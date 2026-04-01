@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import {
   calculatePrizePool,
-  checkMatch,
-  generateAlgorithmicDraw,
-  generateRandomDraw,
+  generateScoreBasedAlgorithmicDraw,
+  generateScoreBasedRandomDraw,
+  guaranteeWinners,
   splitPrize,
 } from "@/lib/draw-engine";
 import { requireAdmin } from "@/lib/admin-auth";
@@ -95,12 +95,25 @@ export async function POST(request: Request) {
   }
 
   const allScores = (scoreRows as ScoreRow[] | null) ?? [];
-  const flatScoreValues = allScores.map((row) => row.score);
+
+  const allUserScores = new Map<string, number[]>();
+  for (const row of allScores) {
+    const existing = allUserScores.get(row.user_id) ?? [];
+    existing.push(row.score);
+    allUserScores.set(row.user_id, existing);
+  }
 
   const drawnNumbers =
     drawMode === "algorithmic"
-      ? generateAlgorithmicDraw(flatScoreValues)
-      : generateRandomDraw();
+      ? generateScoreBasedAlgorithmicDraw(allUserScores)
+      : generateScoreBasedRandomDraw(allUserScores);
+
+  const {
+    adjustedNumbers,
+    fiveMatch: fiveMatchWinners,
+    fourMatch: fourMatchWinners,
+    threeMatch: threeMatchWinners,
+  } = guaranteeWinners(drawnNumbers, allUserScores);
 
   const prizePool = calculatePrizePool(activeSubscriberCount);
 
@@ -119,11 +132,22 @@ export async function POST(request: Request) {
     (prizePool.jackpot + rolloverAmount).toFixed(2),
   );
 
+  console.log("Active user IDs:", activeUserIds);
+  console.log(
+    "User scores map:",
+    JSON.stringify(Object.fromEntries(allUserScores)),
+  );
+  console.log("Original drawn numbers:", drawnNumbers);
+  console.log("Adjusted drawn numbers:", adjustedNumbers);
+  console.log("5-match winners:", fiveMatchWinners.length);
+  console.log("4-match winners:", fourMatchWinners.length);
+  console.log("3-match winners:", threeMatchWinners.length);
+
   const { data: newDraw, error: drawInsertError } = await supabaseAdmin
     .from("draws")
     .insert({
       month,
-      numbers: drawnNumbers,
+      numbers: adjustedNumbers,
       status: "simulated",
       draw_mode: drawMode,
       jackpot_amount: effectiveJackpotPool,
@@ -137,41 +161,6 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
-
-  const userScoresMap = new Map<string, number[]>();
-  for (const row of allScores) {
-    const existing = userScoresMap.get(row.user_id) ?? [];
-    existing.push(row.score);
-    userScoresMap.set(row.user_id, existing);
-  }
-
-  console.log("Active user IDs:", activeUserIds);
-  console.log(
-    "User scores map:",
-    JSON.stringify(Object.fromEntries(userScoresMap)),
-  );
-  console.log("Drawn numbers:", drawnNumbers);
-
-  const fiveMatchWinners = [] as string[];
-  const fourMatchWinners = [] as string[];
-  const threeMatchWinners = [] as string[];
-
-  for (const userId of activeUserIds) {
-    const userScores = userScoresMap.get(userId) ?? [];
-    const matchType = checkMatch(userScores, drawnNumbers);
-
-    if (matchType === 5) {
-      fiveMatchWinners.push(userId);
-    } else if (matchType === 4) {
-      fourMatchWinners.push(userId);
-    } else if (matchType === 3) {
-      threeMatchWinners.push(userId);
-    }
-  }
-
-  console.log("5-match winners:", fiveMatchWinners);
-  console.log("4-match winners:", fourMatchWinners);
-  console.log("3-match winners:", threeMatchWinners);
 
   const fiveMatchShare = splitPrize(
     effectiveJackpotPool,
@@ -232,7 +221,8 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     drawId: newDraw.id,
-    numbers: drawnNumbers,
+    numbers: adjustedNumbers,
+    adjustedNumbers,
     winners: {
       fiveMatch: fiveMatchWinners.length,
       fourMatch: fourMatchWinners.length,

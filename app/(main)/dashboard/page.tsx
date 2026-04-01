@@ -169,8 +169,11 @@ export default async function DashboardPage({
 
   const drawResultsPromise = supabase
     .from("draw_results")
-    .select("*, draws(month, numbers, status)")
+    .select(
+      "id, match_type, individual_share, payment_status, proof_url, created_at, draws!inner(month, numbers, status)",
+    )
     .eq("user_id", userId)
+    .eq("draws.status", "published")
     .order("created_at", { ascending: false })
     .limit(10);
 
