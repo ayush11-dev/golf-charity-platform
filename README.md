@@ -1,36 +1,133 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Golf Charity Platform
 
-## Getting Started
+A subscription-based golf charity platform built with Next.js, Supabase, Stripe, and Resend.
 
-First, run the development server:
+## Features
+
+- Public landing page with unified navigation and charity discovery.
+- Supabase auth flow with protected main app routes.
+- Stripe subscription checkout for monthly/yearly plans.
+- Stripe one-time donation checkout for charities.
+- Dashboard score submission and score management (edit/delete).
+- Monthly draw engine (random/algorithmic), winner generation, and prize allocation.
+- Winner proof URL submission from dashboard.
+- Admin panel with tabs for users, scores, draws, winners, charities, and analytics.
+- Admin controls for user subscription overrides and score moderation.
+- Email notifications for subscription lifecycle and draw outcomes.
+
+## Tech Stack
+
+- Next.js 16 (App Router + proxy)
+- React 19 + TypeScript
+- Supabase (SSR auth + admin service role operations)
+- Stripe (subscriptions and one-time payments)
+- Resend (transactional notifications)
+- Tailwind CSS v4 + Biome
+
+## Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+- Supabase project
+- Stripe account (test mode for local development)
+
+## Environment Variables
+
+Create a `.env.local` file in the project root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+
+STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+
+RESEND_API_KEY=...
+RESEND_FROM_EMAIL=Golf Charity Platform <onboarding@resend.dev>
+
+ADMIN_EMAIL=admin@example.com
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Notes:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `ADMIN_EMAIL` must match the authenticated Supabase user email that should access `/admin`.
+- Plan price IDs are currently defined in `lib/stripe.ts`. Update them for your Stripe account if needed.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local Setup
 
-## Learn More
+1. Install dependencies.
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm install
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+2. Apply database schema from `supabase/schema.sql` to your Supabase project.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+3. Start the app.
 
-## Deploy on Vercel
+```bash
+pnpm dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+4. Open `http://localhost:3000`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Stripe Webhook (Local)
+
+Forward Stripe events to the local webhook endpoint:
+
+```bash
+stripe listen --forward-to http://localhost:3000/api/stripe/webhook
+```
+
+Copy the webhook signing secret from Stripe CLI output into `STRIPE_WEBHOOK_SECRET`.
+
+## Useful Scripts
+
+```bash
+pnpm dev
+pnpm build
+pnpm start
+pnpm lint
+pnpm format
+pnpm smoke
+```
+
+## Smoke Test Suite
+
+A lightweight API/UI guard smoke suite is available at `scripts/smoke.mjs`.
+
+What it validates:
+
+- Public page availability.
+- Redirect guard for protected dashboard routes.
+- Admin API authentication guards.
+- Stripe checkout authentication guard.
+- Donation API request validation.
+- Stripe webhook signature requirement.
+
+Run it against a running app:
+
+```bash
+pnpm build
+pnpm start
+pnpm smoke
+```
+
+To target a different URL:
+
+```bash
+SMOKE_BASE_URL=http://localhost:3001 pnpm smoke
+```
+
+## Verification Checklist
+
+- Sign up/login works and protected routes redirect correctly.
+- Subscription checkout activates plan via webhook.
+- Dashboard allows adding/updating/removing scores.
+- Donation checkout records donations in database.
+- Admin can run/publish draws and update winner status.
+- Admin can update user subscription fields and moderate scores.
+- Notification emails send when configured with Resend.

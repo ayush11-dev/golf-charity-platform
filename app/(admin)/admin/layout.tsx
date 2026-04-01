@@ -20,10 +20,10 @@ export default async function AdminLayout({
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <h1 className="text-lg font-semibold">Admin Panel</h1>
           <Link
-            href="/dashboard"
+            href="/"
             className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800"
           >
-            Back to Dashboard
+            Public Site
           </Link>
         </div>
       </header>

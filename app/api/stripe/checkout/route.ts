@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireNonAdmin } from "@/lib/admin-auth";
 import { PLANS, stripe } from "@/lib/stripe";
 
 const validPriceIds = new Set<string>([
@@ -7,26 +7,33 @@ const validPriceIds = new Set<string>([
   PLANS.yearly.priceId,
 ]);
 
+const planByPriceId: Record<string, "monthly" | "yearly"> = {
+  [PLANS.monthly.priceId]: "monthly",
+  [PLANS.yearly.priceId]: "yearly",
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data, error: claimsError } = await supabase.auth.getClaims();
-    const claims = data?.claims;
-
-    if (claimsError || !claims?.sub) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const auth = await requireNonAdmin();
+    if (!auth.ok) {
+      return auth.response;
     }
 
-    const userId = claims.sub;
-    const userEmail = claims.email;
+    const userId = auth.data.userId;
+    const userEmail = auth.data.email;
 
-    const { priceId, plan } = await request.json();
+    const { priceId } = await request.json();
 
     if (typeof priceId !== "string" || !validPriceIds.has(priceId)) {
       return NextResponse.json(
         { error: "Invalid priceId provided" },
         { status: 400 },
       );
+    }
+
+    const plan = planByPriceId[priceId];
+    if (!plan) {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
@@ -42,9 +49,9 @@ export async function POST(request: NextRequest) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${siteUrl}/dashboard?subscription=success`,
       cancel_url: `${siteUrl}/subscribe`,
-      metadata: { user_id: userId, plan: String(plan ?? "") },
+      metadata: { user_id: userId, plan },
       subscription_data: {
-        metadata: { user_id: userId, plan: String(plan ?? "") },
+        metadata: { user_id: userId, plan },
       },
       customer_email: typeof userEmail === "string" ? userEmail : undefined,
     });

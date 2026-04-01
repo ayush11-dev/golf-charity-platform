@@ -31,7 +31,10 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    const next = new URLSearchParams(window.location.search).get("next");
+    const safeNext = next && next.startsWith("/") ? next : "/dashboard";
+
+    router.replace(safeNext);
     setLoading(false);
   };
 

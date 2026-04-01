@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import CharityContributionForm from "@/app/components/CharityContributionForm";
 import ScoreEntry from "@/app/components/ScoreEntry";
+import ScoreManager from "@/app/components/ScoreManager";
+import WinnerProofSubmission from "@/app/components/WinnerProofSubmission";
+import { createClient } from "@/lib/supabase/server";
 
 type DashboardPageProps = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -33,11 +36,17 @@ type Charity = {
   description: string | null;
 };
 
+type CharityOption = {
+  id: number;
+  name: string;
+};
+
 type DrawResult = {
   id: number;
   match_type: number;
   individual_share: number;
   payment_status: "pending" | "approved" | "paid" | "rejected";
+  proof_url?: string | null;
   created_at: string;
   draws: {
     month: string;
@@ -106,6 +115,27 @@ function paymentStatusClasses(status: DrawResult["payment_status"]) {
   return "border-yellow-500/40 bg-yellow-500/15 text-yellow-200";
 }
 
+function drawStatusClasses(status: string | null | undefined) {
+  if (status === "published") {
+    return "border-emerald-500/40 bg-emerald-500/15 text-emerald-300";
+  }
+  if (status === "simulated") {
+    return "border-amber-500/40 bg-amber-500/15 text-amber-200";
+  }
+  return "border-zinc-600/60 bg-zinc-700/40 text-zinc-300";
+}
+
+function getNextDrawDate() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+}
+
+function getDaysUntil(date: Date) {
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  return Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+}
+
 export default async function DashboardPage({
   searchParams,
 }: DashboardPageProps) {
@@ -128,7 +158,7 @@ export default async function DashboardPage({
     .from("subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .eq("status", "active")
+    .in("status", ["active", "trialing"])
     .maybeSingle();
 
   const scoresPromise = supabase
@@ -142,7 +172,12 @@ export default async function DashboardPage({
     .select("*, draws(month, numbers, status)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
-    .limit(5);
+    .limit(10);
+
+  const charitiesPromise = supabase
+    .from("charities")
+    .select("id, name")
+    .order("name", { ascending: true });
 
   const charityPromise = profilePromise.then(
     async ({ data: profileData, error }) => {
@@ -164,12 +199,14 @@ export default async function DashboardPage({
     scoresResult,
     charityResult,
     drawResultsResult,
+    charitiesResult,
   ] = await Promise.all([
     profilePromise,
     subscriptionPromise,
     scoresPromise,
     charityPromise,
     drawResultsPromise,
+    charitiesPromise,
   ]);
 
   const profile = (profileResult.data as Profile | null) ?? null;
@@ -177,6 +214,7 @@ export default async function DashboardPage({
   const scores = (scoresResult.data as Score[] | null) ?? [];
   const charity = (charityResult.data as Charity | null) ?? null;
   const drawResults = (drawResultsResult.data as DrawResult[] | null) ?? [];
+  const charities = (charitiesResult.data as CharityOption[] | null) ?? [];
 
   const scoreCards = [...scores]
     .sort(
@@ -190,10 +228,14 @@ export default async function DashboardPage({
     .reduce((sum, result) => sum + Number(result.individual_share ?? 0), 0);
 
   const isSubscriptionSuccess = params.subscription === "success";
-  const isActiveSubscription = subscription?.status === "active";
+  const isActiveSubscription =
+    subscription?.status === "active" || subscription?.status === "trialing";
   const planLabel = subscription?.plan
     ? `${subscription.plan.charAt(0).toUpperCase()}${subscription.plan.slice(1)}`
     : "No active plan";
+
+  const nextDrawDate = getNextDrawDate();
+  const nextDrawInDays = getDaysUntil(nextDrawDate);
 
   return (
     <div className="space-y-8">
@@ -221,13 +263,15 @@ export default async function DashboardPage({
 
         <article className="rounded-2xl border border-zinc-800 bg-[#1a1a1a] p-5">
           <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">
-            Prize Draws Entered
+            Participation
           </p>
           <p className="mt-3 text-3xl font-semibold text-white">
             {drawResults.length}
           </p>
+          <p className="mt-2 text-xs text-zinc-400">Draw results recorded</p>
           <p className="mt-2 text-xs text-zinc-400">
-            Based on your most recent entries
+            Next draw in {nextDrawInDays} days (
+            {formatDate(nextDrawDate.toISOString())})
           </p>
         </article>
 
@@ -252,28 +296,15 @@ export default async function DashboardPage({
         </article>
       </section>
 
-      <ScoreEntry userId={userId} />
+      <ScoreEntry />
 
       <section className="rounded-2xl border border-zinc-800 bg-[#1a1a1a] p-6">
         <h2 className="text-xl font-semibold text-white">My Scores</h2>
         {scoreCards.length === 0 ? (
           <p className="mt-4 text-sm text-zinc-400">No scores entered yet</p>
         ) : (
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            {scoreCards.map((score) => (
-              <article
-                key={score.id}
-                className="rounded-xl border border-zinc-700 bg-zinc-900 p-4"
-              >
-                <p className="text-xs uppercase tracking-wide text-zinc-500">
-                  Played {formatDate(score.played_at)}
-                </p>
-                <p className="mt-3 text-3xl font-bold text-white">
-                  {score.score}
-                </p>
-                <p className="text-sm text-zinc-400">pts</p>
-              </article>
-            ))}
+          <div className="mt-5">
+            <ScoreManager scores={scoreCards} />
           </div>
         )}
       </section>
@@ -295,20 +326,12 @@ export default async function DashboardPage({
             {profile?.charity_pct ?? 10}%
           </span>
         </p>
-        <p className="mt-1 text-xs text-zinc-500">Minimum 10%</p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link
-            href="/dashboard/charity"
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800"
-          >
-            Change Charity
-          </Link>
-          <Link
-            href="/dashboard/donate"
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
-          >
-            Donate Directly
-          </Link>
+        <div className="mt-5">
+          <CharityContributionForm
+            charities={charities}
+            currentCharityId={profile?.charity_id ?? null}
+            currentCharityPct={profile?.charity_pct ?? 10}
+          />
         </div>
       </section>
 
@@ -328,7 +351,12 @@ export default async function DashboardPage({
                   <th className="border-b border-zinc-800 pb-3 pr-3">Month</th>
                   <th className="border-b border-zinc-800 pb-3 pr-3">Match</th>
                   <th className="border-b border-zinc-800 pb-3 pr-3">Prize</th>
-                  <th className="border-b border-zinc-800 pb-3">Status</th>
+                  <th className="border-b border-zinc-800 pb-3 pr-3">
+                    Draw Status
+                  </th>
+                  <th className="border-b border-zinc-800 pb-3">
+                    Payout Status
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -344,6 +372,15 @@ export default async function DashboardPage({
                       {currencyFormat.format(
                         Number(result.individual_share ?? 0),
                       )}
+                    </td>
+                    <td className="border-b border-zinc-900 py-3 pr-3">
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${drawStatusClasses(
+                          result.draws?.status,
+                        )}`}
+                      >
+                        {result.draws?.status ?? "unknown"}
+                      </span>
                     </td>
                     <td className="border-b border-zinc-900 py-3">
                       <span
@@ -361,6 +398,8 @@ export default async function DashboardPage({
           </div>
         )}
       </section>
+
+      <WinnerProofSubmission items={drawResults} />
 
       <section className="rounded-2xl border border-zinc-800 bg-[#1a1a1a] p-6">
         <h2 className="text-xl font-semibold text-white">

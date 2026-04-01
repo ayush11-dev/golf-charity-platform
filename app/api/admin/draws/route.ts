@@ -145,6 +145,13 @@ export async function POST(request: Request) {
     userScoresMap.set(row.user_id, existing);
   }
 
+  console.log("Active user IDs:", activeUserIds);
+  console.log(
+    "User scores map:",
+    JSON.stringify(Object.fromEntries(userScoresMap)),
+  );
+  console.log("Drawn numbers:", drawnNumbers);
+
   const fiveMatchWinners = [] as string[];
   const fourMatchWinners = [] as string[];
   const threeMatchWinners = [] as string[];
@@ -161,6 +168,10 @@ export async function POST(request: Request) {
       threeMatchWinners.push(userId);
     }
   }
+
+  console.log("5-match winners:", fiveMatchWinners);
+  console.log("4-match winners:", fourMatchWinners);
+  console.log("3-match winners:", threeMatchWinners);
 
   const fiveMatchShare = splitPrize(
     effectiveJackpotPool,
@@ -202,10 +213,14 @@ export async function POST(request: Request) {
     })),
   ];
 
+  console.log("Draw results payload length:", drawResultsPayload.length);
+
   if (drawResultsPayload.length > 0) {
     const { error: resultsError } = await supabaseAdmin
       .from("draw_results")
       .insert(drawResultsPayload);
+
+    console.log("Draw results insert error:", resultsError);
 
     if (resultsError) {
       return NextResponse.json(

@@ -1,18 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-
-type ScoreEntryProps = {
-  userId: string;
-};
 
 function getTodayIsoDate() {
   return new Date().toISOString().split("T")[0] ?? "";
 }
 
-export default function ScoreEntry({ userId }: ScoreEntryProps) {
+export default function ScoreEntry() {
   const router = useRouter();
   const [score, setScore] = useState<string>("");
   const [playedAt, setPlayedAt] = useState<string>(getTodayIsoDate());
@@ -39,15 +35,19 @@ export default function ScoreEntry({ userId }: ScoreEntryProps) {
     setLoading(true);
 
     try {
-      const supabase = createClient();
-      const { error: insertError } = await supabase.from("scores").insert({
-        user_id: userId,
-        score: parsedScore,
-        played_at: playedAt,
+      const response = await fetch("/api/scores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          score: parsedScore,
+          playedAt,
+        }),
       });
 
-      if (insertError) {
-        setError(insertError.message);
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        setError(data.error ?? "Unable to add score. Please try again.");
         return;
       }
 
@@ -115,9 +115,17 @@ export default function ScoreEntry({ userId }: ScoreEntryProps) {
       ) : null}
 
       {error ? (
-        <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-          {error}
-        </p>
+        <div className="mt-4 space-y-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <p>{error}</p>
+          {error.toLowerCase().includes("active subscription required") ? (
+            <Link
+              href="/subscribe"
+              className="inline-flex rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
+            >
+              Take Subscription
+            </Link>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

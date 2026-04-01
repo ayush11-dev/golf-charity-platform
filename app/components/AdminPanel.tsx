@@ -13,10 +13,26 @@ type UserRow = {
   id: string;
   full_name: string | null;
   subscriptions: Array<{
+    id?: number;
     plan: "monthly" | "yearly";
     status: string;
     current_period_end: string | null;
   }> | null;
+};
+
+type SubscriptionDraft = {
+  plan: "monthly" | "yearly";
+  status: string;
+  current_period_end: string;
+};
+
+type AdminScoreRow = {
+  id: number;
+  user_id: string;
+  score: number;
+  played_at: string;
+  created_at: string;
+  profiles: { full_name: string | null } | null;
 };
 
 type DrawRow = {
@@ -28,11 +44,20 @@ type DrawRow = {
   jackpot_amount: number;
 };
 
+type CharityRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  featured: boolean;
+};
+
 type WinnerRow = {
   id: number;
   match_type: number;
   individual_share: number;
   payment_status: "pending" | "approved" | "paid" | "rejected";
+  proof_url: string | null;
   profiles: { full_name: string | null } | null;
   draws: { month: string; numbers: number[] } | null;
 };
@@ -57,12 +82,20 @@ type AdminPanelProps = {
   analytics: AnalyticsData;
 };
 
-type TabKey = "users" | "draws" | "winners" | "analytics";
+type TabKey =
+  | "users"
+  | "scores"
+  | "draws"
+  | "winners"
+  | "charities"
+  | "analytics";
 
 const tabList: Array<{ key: TabKey; label: string }> = [
   { key: "users", label: "Users" },
+  { key: "scores", label: "Scores" },
   { key: "draws", label: "Draws" },
   { key: "winners", label: "Winners" },
+  { key: "charities", label: "Charities" },
   { key: "analytics", label: "Analytics" },
 ];
 
@@ -105,12 +138,32 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("users");
 
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [userSubscriptionDrafts, setUserSubscriptionDrafts] = useState<
+    Record<string, SubscriptionDraft>
+  >({});
+  const [savingSubscriptionUserId, setSavingSubscriptionUserId] = useState<
+    string | null
+  >(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(
+    null,
+  );
+
+  const [scores, setScores] = useState<AdminScoreRow[]>([]);
+  const [loadingScores, setLoadingScores] = useState(false);
+  const [editingScoreId, setEditingScoreId] = useState<number | null>(null);
+  const [editingScoreValue, setEditingScoreValue] = useState<string>("");
+  const [editingScoreDate, setEditingScoreDate] = useState<string>("");
+  const [savingScoreId, setSavingScoreId] = useState<number | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null);
+
   const [draws, setDraws] = useState<DrawRow[]>([]);
   const [winners, setWinners] = useState<WinnerRow[]>([]);
+  const [charities, setCharities] = useState<CharityRow[]>([]);
 
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadingDraws, setLoadingDraws] = useState(false);
   const [loadingWinners, setLoadingWinners] = useState(false);
+  const [loadingCharities, setLoadingCharities] = useState(false);
 
   const [monthInput, setMonthInput] = useState(() =>
     new Date().toISOString().slice(0, 7),
@@ -120,11 +173,19 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
   const [runError, setRunError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<RunDrawResponse | null>(null);
   const [updatingWinnerId, setUpdatingWinnerId] = useState<number | null>(null);
+  const [editingCharityId, setEditingCharityId] = useState<number | null>(null);
+  const [charityName, setCharityName] = useState("");
+  const [charityDescription, setCharityDescription] = useState("");
+  const [charityImageUrl, setCharityImageUrl] = useState("");
+  const [charityFeatured, setCharityFeatured] = useState(false);
+  const [charityError, setCharityError] = useState<string | null>(null);
+  const [submittingCharity, setSubmittingCharity] = useState(false);
 
   const totalUsers = users.length;
 
   const loadUsers = async () => {
     setLoadingUsers(true);
+    setSubscriptionError(null);
     try {
       const response = await fetch("/api/admin/users", { cache: "no-store" });
       const payload = (await response.json()) as {
@@ -134,11 +195,45 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
       if (!response.ok) {
         throw new Error(payload.error ?? "Failed to load users");
       }
-      setUsers(payload.users ?? []);
+      const nextUsers = payload.users ?? [];
+      setUsers(nextUsers);
+
+      const drafts: Record<string, SubscriptionDraft> = {};
+      for (const user of nextUsers) {
+        const sub = user.subscriptions?.[0];
+        drafts[user.id] = {
+          plan: sub?.plan ?? "monthly",
+          status: sub?.status ?? "inactive",
+          current_period_end: sub?.current_period_end
+            ? (sub.current_period_end.split("T")[0] ?? "")
+            : "",
+        };
+      }
+      setUserSubscriptionDrafts(drafts);
     } catch {
       setUsers([]);
     } finally {
       setLoadingUsers(false);
+    }
+  };
+
+  const loadScores = async () => {
+    setLoadingScores(true);
+    setScoreError(null);
+    try {
+      const response = await fetch("/api/admin/scores", { cache: "no-store" });
+      const payload = (await response.json()) as {
+        scores?: AdminScoreRow[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load scores");
+      }
+      setScores(payload.scores ?? []);
+    } catch {
+      setScores([]);
+    } finally {
+      setLoadingScores(false);
     }
   };
 
@@ -180,9 +275,231 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
     }
   };
 
+  const loadCharities = async () => {
+    setLoadingCharities(true);
+    try {
+      const response = await fetch("/api/admin/charities", {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        charities?: CharityRow[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load charities");
+      }
+      setCharities(payload.charities ?? []);
+    } catch {
+      setCharities([]);
+    } finally {
+      setLoadingCharities(false);
+    }
+  };
+
   useEffect(() => {
-    void Promise.all([loadUsers(), loadDraws(), loadWinners()]);
+    void Promise.all([
+      loadUsers(),
+      loadScores(),
+      loadDraws(),
+      loadWinners(),
+      loadCharities(),
+    ]);
   }, []);
+
+  const updateSubscriptionDraft = (
+    userId: string,
+    key: keyof SubscriptionDraft,
+    value: string,
+  ) => {
+    setUserSubscriptionDrafts((previous) => ({
+      ...previous,
+      [userId]: {
+        ...(previous[userId] ?? {
+          plan: "monthly",
+          status: "inactive",
+          current_period_end: "",
+        }),
+        [key]: value,
+      },
+    }));
+  };
+
+  const saveSubscription = async (userId: string) => {
+    const draft = userSubscriptionDrafts[userId];
+    if (!draft) {
+      return;
+    }
+
+    setSavingSubscriptionUserId(userId);
+    setSubscriptionError(null);
+
+    try {
+      const response = await fetch(`/api/admin/users/${userId}/subscription`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: draft.plan,
+          status: draft.status,
+          current_period_end: draft.current_period_end || null,
+        }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setSubscriptionError(payload.error ?? "Unable to save subscription");
+        return;
+      }
+
+      await loadUsers();
+    } catch {
+      setSubscriptionError("Unable to save subscription");
+    } finally {
+      setSavingSubscriptionUserId(null);
+    }
+  };
+
+  const startEditScore = (score: AdminScoreRow) => {
+    setEditingScoreId(score.id);
+    setEditingScoreValue(String(score.score));
+    setEditingScoreDate(score.played_at.split("T")[0] ?? score.played_at);
+    setScoreError(null);
+  };
+
+  const cancelEditScore = () => {
+    setEditingScoreId(null);
+    setEditingScoreValue("");
+    setEditingScoreDate("");
+  };
+
+  const saveScore = async (scoreId: number) => {
+    setSavingScoreId(scoreId);
+    setScoreError(null);
+
+    const parsedScore = Number(editingScoreValue);
+    if (!Number.isFinite(parsedScore) || parsedScore < 1 || parsedScore > 45) {
+      setScoreError("Score must be between 1 and 45.");
+      setSavingScoreId(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/scores/${scoreId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          score: parsedScore,
+          played_at: editingScoreDate,
+        }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setScoreError(payload.error ?? "Unable to update score");
+        return;
+      }
+
+      cancelEditScore();
+      await loadScores();
+    } catch {
+      setScoreError("Unable to update score");
+    } finally {
+      setSavingScoreId(null);
+    }
+  };
+
+  const deleteScore = async (scoreId: number) => {
+    setSavingScoreId(scoreId);
+    setScoreError(null);
+
+    try {
+      const response = await fetch(`/api/admin/scores/${scoreId}`, {
+        method: "DELETE",
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setScoreError(payload.error ?? "Unable to delete score");
+        return;
+      }
+
+      if (editingScoreId === scoreId) {
+        cancelEditScore();
+      }
+      await loadScores();
+    } catch {
+      setScoreError("Unable to delete score");
+    } finally {
+      setSavingScoreId(null);
+    }
+  };
+
+  const resetCharityForm = () => {
+    setEditingCharityId(null);
+    setCharityName("");
+    setCharityDescription("");
+    setCharityImageUrl("");
+    setCharityFeatured(false);
+  };
+
+  const startEditCharity = (charity: CharityRow) => {
+    setEditingCharityId(charity.id);
+    setCharityName(charity.name);
+    setCharityDescription(charity.description ?? "");
+    setCharityImageUrl(charity.image_url ?? "");
+    setCharityFeatured(charity.featured);
+    setCharityError(null);
+  };
+
+  const submitCharity = async () => {
+    setSubmittingCharity(true);
+    setCharityError(null);
+
+    try {
+      const payload = {
+        name: charityName,
+        description: charityDescription || null,
+        image_url: charityImageUrl || null,
+        featured: charityFeatured,
+      };
+
+      const url = editingCharityId
+        ? `/api/admin/charities/${editingCharityId}`
+        : "/api/admin/charities";
+      const method = editingCharityId ? "PATCH" : "POST";
+
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setCharityError(data.error ?? "Unable to save charity");
+        return;
+      }
+
+      resetCharityForm();
+      await loadCharities();
+    } catch {
+      setCharityError("Unable to save charity");
+    } finally {
+      setSubmittingCharity(false);
+    }
+  };
+
+  const deleteCharity = async (charityId: number) => {
+    const response = await fetch(`/api/admin/charities/${charityId}`, {
+      method: "DELETE",
+    });
+
+    if (response.ok) {
+      if (editingCharityId === charityId) {
+        resetCharityForm();
+      }
+      await loadCharities();
+    }
+  };
 
   const canRunDraw = useMemo(
     () => monthInput.length === 7 && !runningDraw,
@@ -280,6 +597,9 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
           <p className="mt-2 text-sm text-zinc-400">
             Total users: {totalUsers}
           </p>
+          {subscriptionError ? (
+            <p className="mt-3 text-sm text-red-400">{subscriptionError}</p>
+          ) : null}
 
           {loadingUsers ? (
             <p className="mt-4 text-sm text-zinc-400">Loading users...</p>
@@ -298,14 +618,20 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                     <th className="border-b border-zinc-800 pb-2 pr-3">
                       Status
                     </th>
-                    <th className="border-b border-zinc-800 pb-2">
-                      Subscription End
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      Renewal Date
                     </th>
+                    <th className="border-b border-zinc-800 pb-2">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.map((user) => {
-                    const sub = user.subscriptions?.[0];
+                    const draft = userSubscriptionDrafts[user.id] ?? {
+                      plan: "monthly",
+                      status: "inactive",
+                      current_period_end: "",
+                    };
+
                     return (
                       <tr key={user.id} className="text-zinc-200">
                         <td className="border-b border-zinc-900 py-3 pr-3">
@@ -315,13 +641,188 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                           {user.id}
                         </td>
                         <td className="border-b border-zinc-900 py-3 pr-3">
-                          {sub?.plan ?? "N/A"}
+                          <select
+                            value={draft.plan}
+                            onChange={(event) =>
+                              updateSubscriptionDraft(
+                                user.id,
+                                "plan",
+                                event.target.value,
+                              )
+                            }
+                            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100"
+                          >
+                            <option value="monthly">monthly</option>
+                            <option value="yearly">yearly</option>
+                          </select>
                         </td>
                         <td className="border-b border-zinc-900 py-3 pr-3">
-                          {sub?.status ?? "inactive"}
+                          <select
+                            value={draft.status}
+                            onChange={(event) =>
+                              updateSubscriptionDraft(
+                                user.id,
+                                "status",
+                                event.target.value,
+                              )
+                            }
+                            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100"
+                          >
+                            <option value="active">active</option>
+                            <option value="inactive">inactive</option>
+                            <option value="cancelled">cancelled</option>
+                            <option value="trialing">trialing</option>
+                            <option value="past_due">past_due</option>
+                            <option value="unpaid">unpaid</option>
+                          </select>
+                        </td>
+                        <td className="border-b border-zinc-900 py-3 pr-3">
+                          <input
+                            type="date"
+                            value={draft.current_period_end}
+                            onChange={(event) =>
+                              updateSubscriptionDraft(
+                                user.id,
+                                "current_period_end",
+                                event.target.value,
+                              )
+                            }
+                            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100"
+                          />
                         </td>
                         <td className="border-b border-zinc-900 py-3">
-                          {formatDate(sub?.current_period_end ?? null)}
+                          <button
+                            type="button"
+                            onClick={() => void saveSubscription(user.id)}
+                            disabled={savingSubscriptionUserId === user.id}
+                            className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                          >
+                            {savingSubscriptionUserId === user.id
+                              ? "Saving..."
+                              : "Save"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeTab === "scores" ? (
+        <section className="rounded-2xl border border-zinc-800 bg-[#1a1a1a] p-6">
+          <h2 className="text-xl font-semibold text-white">Scores</h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            Edit or remove any submitted user score.
+          </p>
+          {scoreError ? (
+            <p className="mt-3 text-sm text-red-400">{scoreError}</p>
+          ) : null}
+
+          {loadingScores ? (
+            <p className="mt-4 text-sm text-zinc-400">Loading scores...</p>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-155 text-left text-sm">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-zinc-500">
+                    <th className="border-b border-zinc-800 pb-2 pr-3">User</th>
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      User ID
+                    </th>
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      Score
+                    </th>
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      Played At
+                    </th>
+                    <th className="border-b border-zinc-800 pb-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scores.map((score) => {
+                    const isEditing = editingScoreId === score.id;
+                    const isSaving = savingScoreId === score.id;
+
+                    return (
+                      <tr key={score.id} className="text-zinc-200">
+                        <td className="border-b border-zinc-900 py-3 pr-3">
+                          {score.profiles?.full_name ?? "Unknown"}
+                        </td>
+                        <td className="border-b border-zinc-900 py-3 pr-3">
+                          {score.user_id}
+                        </td>
+                        <td className="border-b border-zinc-900 py-3 pr-3">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              min={1}
+                              max={45}
+                              value={editingScoreValue}
+                              onChange={(event) =>
+                                setEditingScoreValue(event.target.value)
+                              }
+                              className="w-20 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100"
+                            />
+                          ) : (
+                            score.score
+                          )}
+                        </td>
+                        <td className="border-b border-zinc-900 py-3 pr-3">
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              value={editingScoreDate}
+                              onChange={(event) =>
+                                setEditingScoreDate(event.target.value)
+                              }
+                              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100"
+                            />
+                          ) : (
+                            formatDate(score.played_at)
+                          )}
+                        </td>
+                        <td className="border-b border-zinc-900 py-3">
+                          <div className="flex gap-2">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveScore(score.id)}
+                                  disabled={isSaving}
+                                  className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelEditScore}
+                                  className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-200"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => startEditScore(score)}
+                                className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-200"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void deleteScore(score.id)}
+                              disabled={isSaving}
+                              className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 disabled:opacity-60"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -491,6 +992,9 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                     <th className="border-b border-zinc-800 pb-2 pr-3">
                       Prize Amount
                     </th>
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      Proof
+                    </th>
                     <th className="border-b border-zinc-800 pb-2">
                       Payment Status
                     </th>
@@ -513,6 +1017,20 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                           Number(winner.individual_share ?? 0),
                         )}
                       </td>
+                      <td className="border-b border-zinc-900 py-3 pr-3">
+                        {winner.proof_url ? (
+                          <a
+                            href={winner.proof_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-300 underline-offset-2 hover:underline"
+                          >
+                            View Proof
+                          </a>
+                        ) : (
+                          <span className="text-zinc-500">Not submitted</span>
+                        )}
+                      </td>
                       <td className="border-b border-zinc-900 py-3">
                         <select
                           value={winner.payment_status}
@@ -530,6 +1048,152 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                           <option value="paid">paid</option>
                           <option value="rejected">rejected</option>
                         </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeTab === "charities" ? (
+        <section className="space-y-5 rounded-2xl border border-zinc-800 bg-[#1a1a1a] p-6">
+          <h2 className="text-xl font-semibold text-white">Charities</h2>
+
+          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+            <h3 className="text-sm font-semibold text-zinc-100">
+              {editingCharityId ? "Edit Charity" : "Add Charity"}
+            </h3>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm text-zinc-300">
+                <span className="mb-1 block">Name</span>
+                <input
+                  type="text"
+                  value={charityName}
+                  onChange={(event) => setCharityName(event.target.value)}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+                />
+              </label>
+
+              <label className="text-sm text-zinc-300">
+                <span className="mb-1 block">Image URL</span>
+                <input
+                  type="url"
+                  value={charityImageUrl}
+                  onChange={(event) => setCharityImageUrl(event.target.value)}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm text-zinc-300">
+              <span className="mb-1 block">Description</span>
+              <textarea
+                value={charityDescription}
+                onChange={(event) => setCharityDescription(event.target.value)}
+                rows={3}
+                className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100"
+              />
+            </label>
+
+            <label className="mt-3 inline-flex items-center gap-2 text-sm text-zinc-300">
+              <input
+                type="checkbox"
+                checked={charityFeatured}
+                onChange={(event) => setCharityFeatured(event.target.checked)}
+              />
+              Featured charity
+            </label>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void submitCharity()}
+                disabled={submittingCharity}
+                className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+              >
+                {submittingCharity
+                  ? "Saving..."
+                  : editingCharityId
+                    ? "Update Charity"
+                    : "Add Charity"}
+              </button>
+              {editingCharityId ? (
+                <button
+                  type="button"
+                  onClick={resetCharityForm}
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-semibold text-zinc-200"
+                >
+                  Cancel Edit
+                </button>
+              ) : null}
+            </div>
+
+            {charityError ? (
+              <p className="mt-3 text-sm text-red-400">{charityError}</p>
+            ) : null}
+          </div>
+
+          {loadingCharities ? (
+            <p className="text-sm text-zinc-400">Loading charities...</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-155 text-left text-sm">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-zinc-500">
+                    <th className="border-b border-zinc-800 pb-2 pr-3">Name</th>
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      Featured
+                    </th>
+                    <th className="border-b border-zinc-800 pb-2 pr-3">
+                      Image
+                    </th>
+                    <th className="border-b border-zinc-800 pb-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {charities.map((charity) => (
+                    <tr key={charity.id} className="text-zinc-200">
+                      <td className="border-b border-zinc-900 py-3 pr-3">
+                        {charity.name}
+                      </td>
+                      <td className="border-b border-zinc-900 py-3 pr-3">
+                        {charity.featured ? "Yes" : "No"}
+                      </td>
+                      <td className="border-b border-zinc-900 py-3 pr-3">
+                        {charity.image_url ? (
+                          <a
+                            href={charity.image_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-300 underline-offset-2 hover:underline"
+                          >
+                            View
+                          </a>
+                        ) : (
+                          <span className="text-zinc-500">N/A</span>
+                        )}
+                      </td>
+                      <td className="border-b border-zinc-900 py-3">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEditCharity(charity)}
+                            className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-200"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteCharity(charity.id)}
+                            className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
