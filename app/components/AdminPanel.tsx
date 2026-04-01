@@ -57,7 +57,6 @@ type WinnerRow = {
   match_type: number;
   individual_share: number;
   payment_status: "pending" | "approved" | "paid" | "rejected";
-  proof_url: string | null;
   profiles: { full_name: string | null } | null;
   draws: { month: string; numbers: number[] } | null;
 };
@@ -172,7 +171,6 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
   const [runningDraw, setRunningDraw] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<RunDrawResponse | null>(null);
-  const [updatingWinnerId, setUpdatingWinnerId] = useState<number | null>(null);
   const [editingCharityId, setEditingCharityId] = useState<number | null>(null);
   const [charityName, setCharityName] = useState("");
   const [charityDescription, setCharityDescription] = useState("");
@@ -548,27 +546,6 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
 
     if (response.ok) {
       await loadDraws();
-    }
-  };
-
-  const updateWinnerStatus = async (
-    resultId: number,
-    paymentStatus: WinnerRow["payment_status"],
-  ) => {
-    setUpdatingWinnerId(resultId);
-
-    try {
-      const response = await fetch("/api/admin/winners", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resultId, paymentStatus }),
-      });
-
-      if (response.ok) {
-        await loadWinners();
-      }
-    } finally {
-      setUpdatingWinnerId(null);
     }
   };
 
@@ -992,9 +969,6 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                     <th className="border-b border-zinc-800 pb-2 pr-3">
                       Prize Amount
                     </th>
-                    <th className="border-b border-zinc-800 pb-2 pr-3">
-                      Proof
-                    </th>
                     <th className="border-b border-zinc-800 pb-2">
                       Payment Status
                     </th>
@@ -1017,37 +991,10 @@ export default function AdminPanel({ analytics }: AdminPanelProps) {
                           Number(winner.individual_share ?? 0),
                         )}
                       </td>
-                      <td className="border-b border-zinc-900 py-3 pr-3">
-                        {winner.proof_url ? (
-                          <a
-                            href={winner.proof_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-emerald-300 underline-offset-2 hover:underline"
-                          >
-                            View Proof
-                          </a>
-                        ) : (
-                          <span className="text-zinc-500">Not submitted</span>
-                        )}
-                      </td>
                       <td className="border-b border-zinc-900 py-3">
-                        <select
-                          value={winner.payment_status}
-                          disabled={updatingWinnerId === winner.id}
-                          onChange={(event) =>
-                            void updateWinnerStatus(
-                              winner.id,
-                              event.target.value as WinnerRow["payment_status"],
-                            )
-                          }
-                          className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-100"
-                        >
-                          <option value="pending">pending</option>
-                          <option value="approved">approved</option>
-                          <option value="paid">paid</option>
-                          <option value="rejected">rejected</option>
-                        </select>
+                        <span className="capitalize text-zinc-200">
+                          {winner.payment_status}
+                        </span>
                       </td>
                     </tr>
                   ))}

@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import CharityContributionForm from "@/app/components/CharityContributionForm";
 import ScoreEntry from "@/app/components/ScoreEntry";
 import ScoreManager from "@/app/components/ScoreManager";
-import WinnerProofSubmission from "@/app/components/WinnerProofSubmission";
 import { createClient } from "@/lib/supabase/server";
 
 type DashboardPageProps = {
@@ -46,7 +45,6 @@ type DrawResult = {
   match_type: number;
   individual_share: number;
   payment_status: "pending" | "approved" | "paid" | "rejected";
-  proof_url?: string | null;
   created_at: string;
   draws: {
     month: string;
@@ -170,7 +168,7 @@ export default async function DashboardPage({
   const drawResultsPromise = supabase
     .from("draw_results")
     .select(
-      "id, match_type, individual_share, payment_status, proof_url, created_at, draws!inner(month, numbers, status)",
+      "id, match_type, individual_share, payment_status, created_at, draws!inner(month, numbers, status)",
     )
     .eq("user_id", userId)
     .eq("draws.status", "published")
@@ -401,8 +399,6 @@ export default async function DashboardPage({
           </div>
         )}
       </section>
-
-      <WinnerProofSubmission items={drawResults} />
 
       <section className="rounded-2xl border border-zinc-800 bg-[#1a1a1a] p-6">
         <h2 className="text-xl font-semibold text-white">

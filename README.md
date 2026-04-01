@@ -74,6 +74,30 @@ pnpm dev
 
 4. Open `http://localhost:3000`.
 
+## Test Credentials (Local Only)
+
+Use these accounts for local/demo testing only.
+
+### Admin
+
+- Email: `admin@gmail.com`
+- Password: `Admin@123`
+
+### Users
+
+- Email: `ayush@gmail.com`
+	Password: `Ayush@123`
+- Email: `suresh@gmail.com`
+	Password: `Ayush@123`
+- Email: `ramesh@gmail.com`
+	Password: `Ayush@123`
+
+### Stripe Test Card
+
+- Card number: `4242 4242 4242 4242`
+- Expiry: `12/29`
+- CVC: `123`
+
 ## Stripe Webhook (Local)
 
 Forward Stripe events to the local webhook endpoint:

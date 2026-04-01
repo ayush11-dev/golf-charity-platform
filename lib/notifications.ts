@@ -111,7 +111,6 @@ export async function sendWinnerAlertEmail(payload: DrawEmailPayload) {
     `Winner Alert - ${monthLabel}`,
     `<p>Congratulations! You are a winner in the ${monthLabel} draw.</p>
      <p>Match tier: <strong>${payload.winner.matchType}</strong></p>
-     <p>Prize amount: <strong>${formatCurrency(payload.winner.prizeAmount)}</strong></p>
-     <p>Please submit your proof in the dashboard to complete verification.</p>`,
+     <p>Prize amount: <strong>${formatCurrency(payload.winner.prizeAmount)}</strong></p>`,
   );
 }
